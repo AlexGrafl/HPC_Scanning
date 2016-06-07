@@ -15,7 +15,7 @@ public class Main
 {
 
     private static final int WORK_GROUP_COUNT = 128;
-    private static final int DATA_SIZE = 4;
+    private static final int DATA_SIZE = 2048;
 
     public static void main(String args[]){
 
@@ -25,7 +25,15 @@ public class Main
         for (int i = 0; i < split.length / DATA_SIZE; i++) {
             inputArray[i] = Float.valueOf(split[i]);
         }
-        System.out.println("Num: \t\t" + inputArray.length);
+        System.out.println("Array lenght power of two: \t\t" + ((inputArray.length & (inputArray.length - 1)) == 0 ? true : false));
+        if (((inputArray.length & (inputArray.length - 1)) == 0) == false){
+            return;
+        }
+
+        System.out.println("WORK_GROUP_COUNT power of two: \t\t" + ((WORK_GROUP_COUNT & (WORK_GROUP_COUNT - 1)) == 0 ? true : false));
+        if (((WORK_GROUP_COUNT & (WORK_GROUP_COUNT - 1)) == 0) == false){
+            return;
+        }
 //        int[] doubleArray = new Random().ints((long) Math.pow(2, 16), 0, 1000).toArray();
 //        float[] inputArray = new float[]{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
 //        System.out.print("{");
@@ -49,7 +57,7 @@ public class Main
         // that will be used
         final int platformIndex = 0;
         final long deviceType = CL_DEVICE_TYPE_ALL;
-        final int deviceIndex = 1;
+        final int deviceIndex = 0;
 
         // Enable exceptions and subsequently omit error checks in this sample
         setExceptionsEnabled(true);
