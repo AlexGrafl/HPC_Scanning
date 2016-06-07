@@ -5,6 +5,8 @@ import org.jocl.*;
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
+import java.sql.Time;
+import java.util.concurrent.TimeUnit;
 import java.util.Arrays;
 
 import static org.jocl.CL.*;
@@ -12,18 +14,20 @@ import static org.jocl.CL.*;
 public class Main
 {
 
-    private static final int WORK_GROUP_COUNT = 2;
+    private static final int WORK_GROUP_COUNT = 128;
+    private static final int DATA_SIZE = 4;
 
     public static void main(String args[]){
 
-//        String data = readFile("data.txt");
-//        String[] split = data.split(",");
-//        float[] inputArray = new float[split.length];
-//        for (int i = 0; i < split.length; i++) {
-//            inputArray[i] = Float.valueOf(split[i]);
-//        }
+        String data = readFile("data.txt");
+        String[] split = data.split(",");
+        float[] inputArray = new float[split.length / DATA_SIZE];
+        for (int i = 0; i < split.length / DATA_SIZE; i++) {
+            inputArray[i] = Float.valueOf(split[i]);
+        }
+        System.out.println("Num: \t\t" + inputArray.length);
 //        int[] doubleArray = new Random().ints((long) Math.pow(2, 16), 0, 1000).toArray();
-        float[] inputArray = new float[]{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+//        float[] inputArray = new float[]{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
 //        System.out.print("{");
 //        for (int i = 0 ; i < doubleArray.length; i++) {
 //            inputArray[i] = (float) doubleArray[i];
@@ -43,9 +47,9 @@ public class Main
 
         // The platform, device type and device number
         // that will be used
-        final int platformIndex = 2;
+        final int platformIndex = 0;
         final long deviceType = CL_DEVICE_TYPE_ALL;
-        final int deviceIndex = 0;
+        final int deviceIndex = 1;
 
         // Enable exceptions and subsequently omit error checks in this sample
         setExceptionsEnabled(true);
@@ -97,15 +101,15 @@ public class Main
                 1, new String[]{ programSource }, null, null);
         clBuildProgram(program, 0, null, null, null, null);
         cl_kernel kernel = clCreateKernel(program, "scan", null);
-        scanInput(predicatedArray, scannedPredicates, lastOutsArray, context, commandQueue, kernel);
-        scanInput(lastOutsArray, scannedLastOutsArray, null, context, commandQueue, kernel);
+        long time1 = scanInput(predicatedArray, scannedPredicates, lastOutsArray, context, commandQueue, kernel);
+        long time2 = scanInput(lastOutsArray, scannedLastOutsArray, null, context, commandQueue, kernel);
         clReleaseKernel(kernel);
         clReleaseProgram(program);
 
         cl_program addProgram = clCreateProgramWithSource(context, 1, new String[]{addProgramSource}, null, null);
         clBuildProgram(addProgram, 0, null, null, null, null);
         cl_kernel addKernel = clCreateKernel(addProgram, "add", null);
-        addLastOutsToOut(scannedLastOutsArray, scannedPredicates, context, commandQueue, addKernel);
+        long time3 = addLastOutsToOut(scannedLastOutsArray, scannedPredicates, context, commandQueue, addKernel);
 //        System.out.println("Output2: \t" + Arrays.toString(outputArray));
         clReleaseKernel(addKernel);
         clReleaseProgram(addProgram);
@@ -117,15 +121,16 @@ public class Main
         clBuildProgram(scatterProgram, 0, null, null, null, null);
         cl_kernel scatterKernel = clCreateKernel(scatterProgram, "scatter", null);
 
-        applyScatter(inputArray, scannedLastOutsArray, scatteredArray, context, commandQueue, scatterKernel);
+        long time4 = applyScatter(inputArray, scannedLastOutsArray, scatteredArray, context, commandQueue, scatterKernel);
 
         System.out.println("Scattered: \t\t" + Arrays.toString(scatteredArray));
+        System.out.println("GPU: " + TimeUnit.NANOSECONDS.toMillis(time1 + time2 + time3 + time4));
 
         clReleaseCommandQueue(commandQueue);
         clReleaseContext(context);
     }
 
-    private static void addLastOutsToOut(int[] lastOutsScannedArray, int[] outputArray, cl_context context, cl_command_queue commandQueue, cl_kernel kernel) {
+    private static long addLastOutsToOut(int[] lastOutsScannedArray, int[] outputArray, cl_context context, cl_command_queue commandQueue, cl_kernel kernel) {
         Pointer lastOutsPointer = Pointer.to(lastOutsScannedArray);
         Pointer inPointer = Pointer.to(outputArray);
         int[] tempOutArray = new int[outputArray.length];
@@ -138,6 +143,7 @@ public class Main
         clSetKernelArg(kernel, 2, Sizeof.cl_mem, Pointer.to(outBuffer));
         long global_work_size[] = new long[]{outputArray.length};
         long local_work_size[] = new long[]{ outputArray.length / lastOutsScannedArray.length };
+        long start = System.nanoTime();
         clEnqueueNDRangeKernel(commandQueue, kernel, 1, null, global_work_size, local_work_size, 0, null, null);
         clEnqueueReadBuffer(commandQueue, outBuffer, true, 0, outputArray.length * Sizeof.cl_int,
                 outPointer, 0, null, null);
@@ -145,6 +151,9 @@ public class Main
         clReleaseMemObject(outBuffer);
         clReleaseMemObject(lastOutsBuffer);
         System.arraycopy(tempOutArray, 0, outputArray, 0, tempOutArray.length);
+        long end = System.nanoTime();
+
+        return end - start;
     }
 
     private static void applyPredicate(float[] intput, int[] predicatedArray, cl_context context, cl_command_queue commandQueue, cl_kernel kernel) {
@@ -165,7 +174,7 @@ public class Main
         System.arraycopy(tempOutArray, 0, predicatedArray, 0, tempOutArray.length);
     }
 
-    private static void scanInput(int[] inArray, int[] outArray, int[] lastOutsArray, cl_context context, cl_command_queue commandQueue, cl_kernel kernel) {
+    private static long scanInput(int[] inArray, int[] outArray, int[] lastOutsArray, cl_context context, cl_command_queue commandQueue, cl_kernel kernel) {
         Pointer inPointer = Pointer.to(inArray);
         int[] tempOutArray = new int[outArray.length];
         int[] tempLastOutsArray = null;
@@ -190,6 +199,8 @@ public class Main
 
         long global_work_size[] = new long[]{localWorkSize == inArray.length ? inArray.length : inArray.length / 2};
         long local_work_size[] = new long[]{ localWorkSize };
+
+        long start = System.nanoTime();
         clEnqueueNDRangeKernel(commandQueue, kernel, 1, null, global_work_size, local_work_size, 0, null, null);
         clEnqueueReadBuffer(commandQueue, outBuffer, true, 0, outArray.length * Sizeof.cl_int,
                 outPointer, 0, null, null);
@@ -204,9 +215,11 @@ public class Main
             clReleaseMemObject(lastOutsBuffer);
             System.arraycopy(tempLastOutsArray, 0, lastOutsArray, 0, tempLastOutsArray.length);
         }
+        long end = System.nanoTime();
+        return end-start;
     }
 
-    private static void applyScatter(float[] input, int[] scannedPredicates, float[] output, cl_context context, cl_command_queue commandQueue, cl_kernel kernel){
+    private static long applyScatter(float[] input, int[] scannedPredicates, float[] output, cl_context context, cl_command_queue commandQueue, cl_kernel kernel){
         Pointer inPointer = Pointer.to(input);
         Pointer predicatesPointer = Pointer.to(scannedPredicates);
         float[] tempOutArray = new float[output.length];
@@ -224,6 +237,8 @@ public class Main
         clSetKernelArg(kernel, 3, Sizeof.cl_mem, Pointer.to(outBuffer));
         long global_work_size[] = new long[]{localWorkSize == input.length ? input.length : input.length / 2};
         long local_work_size[] = new long[]{ localWorkSize };
+
+        long start = System.nanoTime();
         clEnqueueNDRangeKernel(commandQueue, kernel, 1, null, global_work_size, local_work_size, 0, null, null);
         clEnqueueReadBuffer(commandQueue, outBuffer, true, 0, output.length * Sizeof.cl_float,
                 outPointer, 0, null, null);
@@ -232,6 +247,8 @@ public class Main
         clReleaseMemObject(scannedPredicatesBuffer);
         clReleaseMemObject(outBuffer);
         System.arraycopy(tempOutArray, 0, output, 0, tempOutArray.length);
+        long end = System.nanoTime();
+        return end-start;
     }
 
     private static String readFile(String fileName)

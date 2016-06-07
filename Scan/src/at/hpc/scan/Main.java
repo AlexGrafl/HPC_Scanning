@@ -6,6 +6,8 @@ import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.StringJoiner;
+import java.util.concurrent.TimeUnit;
 
 import static org.jocl.CL.*;
 
@@ -13,14 +15,15 @@ public class Main
 {
 
     private static final int WORK_GROUP_COUNT = 1024;
+    private static final int DATA_SIZE = 1;
 
     public static void main(String args[]){
 
         String data = readFile("data.txt");
         String[] split = data.split(",");
-        float[] inputArray = new float[split.length];
-        for (int i = 0; i < split.length; i++) {
-            inputArray[i] = Float.valueOf(split[i]);
+        float[] inputArray = new float[split.length / DATA_SIZE];
+        for (int i = 0; i < split.length / DATA_SIZE; i++) {
+                inputArray[i] = Float.valueOf(split[i]);
         }
 //        int[] doubleArray = new Random().ints((long) Math.pow(2, 16), 0, 1000).toArray();
 //        float[] inputArray = new float[doubleArray.length];
@@ -40,9 +43,9 @@ public class Main
 
         // The platform, device type and device number
         // that will be used
-        final int platformIndex = 2;
+        final int platformIndex = 0;
         final long deviceType = CL_DEVICE_TYPE_ALL;
-        final int deviceIndex = 0;
+        final int deviceIndex = 1;
 
         // Enable exceptions and subsequently omit error checks in this sample
         setExceptionsEnabled(true);
@@ -84,16 +87,24 @@ public class Main
         cl_kernel kernel = clCreateKernel(program, "scan", null);
         System.out.println("Num: \t\t" + inputArray.length);
 //        System.out.println("Input: \t\t" + Arrays.toString(inputArray));
+
+        long startSeq = System.nanoTime();
         float[] seqOut = sequentialScan(inputArray);
-        scanInput(inputArray, outputArray, lastOutsArray, context, commandQueue, kernel);
+        long endSeq = System.nanoTime();
+
+
+        long time1 = scanInput(inputArray, outputArray, lastOutsArray, context, commandQueue, kernel);
 //        System.out.println("Output1: \t" + Arrays.toString(outputArray));
-        scanInput(lastOutsArray, lastOutsScannedArray, null, context, commandQueue, kernel);
+        long time2 = scanInput(lastOutsArray, lastOutsScannedArray, null, context, commandQueue, kernel);
+
         clReleaseKernel(kernel);
         clReleaseProgram(program);
         cl_program add_program = clCreateProgramWithSource(context, 1, new String[]{addProgramSource}, null, null);
         clBuildProgram(add_program, 0, null, null, null, null);
         cl_kernel add_kernel = clCreateKernel(add_program, "add", null);
-        addLastOutsToOut(lastOutsScannedArray, outputArray, context, commandQueue, add_kernel);
+
+        long time3 = addLastOutsToOut(lastOutsScannedArray, outputArray, context, commandQueue, add_kernel);
+
 //        System.out.println("Output2: \t" + Arrays.toString(outputArray));
         clReleaseKernel(add_kernel);
         clReleaseProgram(add_program);
@@ -109,9 +120,12 @@ public class Main
 //        System.out.println("LastOuts: \t" + Arrays.toString(lastOutsArray));
 //        System.out.println("Scanned: \t" + Arrays.toString(lastOutsScannedArray));
         System.out.println("Parallel successful ? " + (Arrays.equals(outputArray, seqOut) ? "true" : "false"));
+
+        System.out.println("GPU: " + TimeUnit.NANOSECONDS.toMillis(time1 + time2 + time3));
+        System.out.println("Seq: " + TimeUnit.NANOSECONDS.toMillis(endSeq - startSeq));
     }
 
-    private static void addLastOutsToOut(float[] lastOutsScannedArray, float[] outputArray, cl_context context, cl_command_queue commandQueue, cl_kernel kernel) {
+    private static long addLastOutsToOut(float[] lastOutsScannedArray, float[] outputArray, cl_context context, cl_command_queue commandQueue, cl_kernel kernel) {
         Pointer lastOutsPointer = Pointer.to(lastOutsScannedArray);
         Pointer inPointer = Pointer.to(outputArray);
         float[] tempOutArray = new float[outputArray.length];
@@ -124,6 +138,7 @@ public class Main
         clSetKernelArg(kernel, 2, Sizeof.cl_mem, Pointer.to(outBuffer));
         long global_work_size[] = new long[]{outputArray.length};
         long local_work_size[] = new long[]{ outputArray.length / lastOutsScannedArray.length };
+        long start = System.nanoTime();
         clEnqueueNDRangeKernel(commandQueue, kernel, 1, null, global_work_size, local_work_size, 0, null, null);
         clEnqueueReadBuffer(commandQueue, outBuffer, true, 0, outputArray.length * Sizeof.cl_float,
                 outPointer, 0, null, null);
@@ -131,9 +146,12 @@ public class Main
         clReleaseMemObject(outBuffer);
         clReleaseMemObject(lastOutsBuffer);
         System.arraycopy(tempOutArray, 0, outputArray, 0, tempOutArray.length);
+        long end = System.nanoTime();
+
+        return end-start;
     }
 
-    private static void scanInput(float[] inArray, float[] outArray, float[] lastOutsArray, cl_context context, cl_command_queue commandQueue, cl_kernel kernel) {
+    private static long scanInput(float[] inArray, float[] outArray, float[] lastOutsArray, cl_context context, cl_command_queue commandQueue, cl_kernel kernel) {
         Pointer inPointer = Pointer.to(inArray);
         float[] tempOutArray = new float[outArray.length];
         float[] tempLastOutsArray = null;
@@ -160,6 +178,8 @@ public class Main
         long local_work_size[] = new long[]{ localWorkSize };
         System.out.println("global work size " + global_work_size[0]);
         System.out.println("local work size " + local_work_size[0]);
+
+        long start = System.nanoTime();
         clEnqueueNDRangeKernel(commandQueue, kernel, 1, null, global_work_size, local_work_size, 0, null, null);
         clEnqueueReadBuffer(commandQueue, outBuffer, true, 0, outArray.length * Sizeof.cl_float,
                 outPointer, 0, null, null);
@@ -174,6 +194,9 @@ public class Main
             clReleaseMemObject(lastOutsBuffer);
             System.arraycopy(tempLastOutsArray, 0, lastOutsArray, 0, tempLastOutsArray.length);
         }
+        long end = System.nanoTime();
+
+        return end-start;
     }
 
     private static String readFile(String fileName)
