@@ -5,17 +5,16 @@ import org.jocl.*;
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
-import java.sql.Time;
-import java.util.concurrent.TimeUnit;
 import java.util.Arrays;
+import java.util.concurrent.TimeUnit;
 
 import static org.jocl.CL.*;
 
 public class Main
 {
 
-    private static final int WORK_GROUP_COUNT = 128;
-    private static final int DATA_SIZE = 2048;
+    private static final int WORK_GROUP_COUNT = 8;
+    private static final int DATA_SIZE = 32768;
 
     public static void main(String args[]){
 
@@ -55,7 +54,7 @@ public class Main
 
         // The platform, device type and device number
         // that will be used
-        final int platformIndex = 0;
+        final int platformIndex = 2;
         final long deviceType = CL_DEVICE_TYPE_ALL;
         final int deviceIndex = 0;
 
@@ -129,11 +128,12 @@ public class Main
         clBuildProgram(scatterProgram, 0, null, null, null, null);
         cl_kernel scatterKernel = clCreateKernel(scatterProgram, "scatter", null);
 
-        long time4 = applyScatter(inputArray, scannedLastOutsArray, scatteredArray, context, commandQueue, scatterKernel);
+        long time4 = applyScatter(inputArray, scannedPredicates, scatteredArray, context, commandQueue, scatterKernel);
 
         System.out.println("Scattered: \t\t" + Arrays.toString(scatteredArray));
         System.out.println("GPU: " + TimeUnit.NANOSECONDS.toMillis(time1 + time2 + time3 + time4));
-
+        clReleaseKernel(scatterKernel);
+        clReleaseProgram(scatterProgram);
         clReleaseCommandQueue(commandQueue);
         clReleaseContext(context);
     }
@@ -164,16 +164,16 @@ public class Main
         return end - start;
     }
 
-    private static void applyPredicate(float[] intput, int[] predicatedArray, cl_context context, cl_command_queue commandQueue, cl_kernel kernel) {
-        Pointer inPointer = Pointer.to(intput);
+    private static void applyPredicate(float[] input, int[] predicatedArray, cl_context context, cl_command_queue commandQueue, cl_kernel kernel) {
+        Pointer inPointer = Pointer.to(input);
         int[] tempOutArray = new int[predicatedArray.length];
         Pointer outPointer = Pointer.to(tempOutArray);
-        cl_mem inBuffer = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, intput.length * Sizeof.cl_float, inPointer, null);
+        cl_mem inBuffer = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, input.length * Sizeof.cl_float, inPointer, null);
         cl_mem outBuffer = clCreateBuffer(context, CL_MEM_WRITE_ONLY, predicatedArray.length * Sizeof.cl_int, null, null);
         clSetKernelArg(kernel, 0, Sizeof.cl_mem, Pointer.to(inBuffer));
         clSetKernelArg(kernel, 1, Sizeof.cl_mem, Pointer.to(outBuffer));
-        long global_work_size[] = new long[]{intput.length};
-        long local_work_size[] = new long[]{ intput.length / WORK_GROUP_COUNT };
+        long global_work_size[] = new long[]{input.length};
+        long local_work_size[] = new long[]{ input.length / WORK_GROUP_COUNT };
         clEnqueueNDRangeKernel(commandQueue, kernel, 1, null, global_work_size, local_work_size, 0, null, null);
         clEnqueueReadBuffer(commandQueue, outBuffer, true, 0, predicatedArray.length * Sizeof.cl_int,
                 outPointer, 0, null, null);
@@ -194,7 +194,7 @@ public class Main
             lastOutsPointer = Pointer.to(tempLastOutsArray);
         }
         long localWorkSize = inArray.length / (WORK_GROUP_COUNT * 2);
-        if(localWorkSize == 0) localWorkSize = inArray.length;
+        if(localWorkSize <= 0) localWorkSize = inArray.length;
 
         cl_mem inBuffer = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, inArray.length * Sizeof.cl_int, inPointer, null);
         cl_mem outBuffer = clCreateBuffer(context, CL_MEM_WRITE_ONLY, outArray.length * Sizeof.cl_int, null, null);
@@ -233,7 +233,7 @@ public class Main
         float[] tempOutArray = new float[output.length];
         Pointer outPointer = Pointer.to(tempOutArray);
         long localWorkSize = input.length / (WORK_GROUP_COUNT * 2);
-        if(localWorkSize == 0) localWorkSize = input.length;
+        if(localWorkSize <= 0) localWorkSize = input.length;
 
         cl_mem inBuffer = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, input.length * Sizeof.cl_float, inPointer, null);
         cl_mem scannedPredicatesBuffer = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, scannedPredicates.length * Sizeof.cl_int, predicatesPointer, null);

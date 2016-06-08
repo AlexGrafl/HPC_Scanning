@@ -6,7 +6,6 @@ import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.StringJoiner;
 import java.util.concurrent.TimeUnit;
 
 import static org.jocl.CL.*;
@@ -14,28 +13,30 @@ import static org.jocl.CL.*;
 public class Main
 {
 
-    private static final int WORK_GROUP_COUNT = 1024;
-    private static final int DATA_SIZE = 2048;
+    private static int workGroupCount = 0;
+    private static final int DATA_SIZE = 16;
 
     public static void main(String args[]){
 
-        String data = readFile("data.txt");
-        String[] split = data.split(",");
-        float[] inputArray = new float[split.length / DATA_SIZE];
-        for (int i = 0; i < split.length / DATA_SIZE; i++) {
-                inputArray[i] = Float.valueOf(split[i]);
-        }
-        System.out.println("Array lenght power of two: \t\t" + ((inputArray.length & (inputArray.length - 1)) == 0 ? true : false));
-        if (((inputArray.length & (inputArray.length - 1)) == 0) == false){
-            return;
-        }
-
-        System.out.println("WORK_GROUP_COUNT power of two: \t\t" + ((WORK_GROUP_COUNT & (WORK_GROUP_COUNT - 1)) == 0 ? true : false));
-        if (((WORK_GROUP_COUNT & (WORK_GROUP_COUNT - 1)) == 0) == false){
-            return;
-        }
+//        String data = readFile("data.txt");
+//        String[] split = data.split(",");
+//        float[] inputArray = new float[split.length / DATA_SIZE];
+//        for (int i = 0; i < split.length / DATA_SIZE; i++) {
+//                inputArray[i] = Float.valueOf(split[i]);
+//        }
+//        System.out.println("Array lenght power of two: \t\t" + ((inputArray.length & (inputArray.length - 1)) == 0 ? true : false));
+//        if (((inputArray.length & (inputArray.length - 1)) == 0) == false){
+//            return;
+//        }
+//
+//        System.out.println("workGroupCount power of two: \t\t" + ((workGroupCount & (workGroupCount - 1)) == 0 ? true : false));
+//        if (((workGroupCount & (workGroupCount - 1)) == 0) == false){
+//            return;
+//        }
 //        int[] doubleArray = new Random().ints((long) Math.pow(2, 16), 0, 1000).toArray();
-//        float[] inputArray = new float[doubleArray.length];
+        float[] inputArray = new float[(int) Math.pow(2, 19)];
+        Arrays.fill(inputArray, 2);
+        workGroupCount = inputArray.length / 512;
 //        System.out.print("{");
 //        for (int i = 0 ; i < doubleArray.length; i++) {
 //            inputArray[i] = (float) doubleArray[i];
@@ -43,8 +44,8 @@ public class Main
 //        }
 //        System.out.print("}");
         float[] outputArray = new float[inputArray.length];
-        float[] lastOutsArray = new float[WORK_GROUP_COUNT];
-        float[] lastOutsScannedArray = new float[WORK_GROUP_COUNT];
+        float[] lastOutsArray = new float[workGroupCount];
+        float[] lastOutsScannedArray = new float[workGroupCount];
 
 //        String programSource = readFile("src/at/hpc/scan/kernel.cl");
         String programSource = readFile("src/at/hpc/scan/kernel_work_efficient.cl");
@@ -52,7 +53,7 @@ public class Main
 
         // The platform, device type and device number
         // that will be used
-        final int platformIndex = 0;
+        final int platformIndex = 2;
         final long deviceType = CL_DEVICE_TYPE_ALL;
         final int deviceIndex = 0;
 
@@ -171,8 +172,9 @@ public class Main
             tempLastOutsArray = new float[lastOutsArray.length];
             lastOutsPointer = Pointer.to(tempLastOutsArray);
         }
-        long localWorkSize = inArray.length / (WORK_GROUP_COUNT * 2);
+        long localWorkSize = inArray.length / (workGroupCount * 2);
         if(localWorkSize == 0) localWorkSize = inArray.length;
+        if(localWorkSize >= 1024) localWorkSize = 512;
 
         cl_mem inBuffer = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, inArray.length * Sizeof.cl_float, inPointer, null);
         cl_mem outBuffer = clCreateBuffer(context, CL_MEM_WRITE_ONLY, outArray.length * Sizeof.cl_float, null, null);
@@ -185,8 +187,8 @@ public class Main
 
         long global_work_size[] = new long[]{localWorkSize == inArray.length ? inArray.length : inArray.length / 2};
         long local_work_size[] = new long[]{ localWorkSize };
-        System.out.println("global work size " + global_work_size[0]);
-        System.out.println("local work size " + local_work_size[0]);
+        System.out.println("global workGroupCount size " + global_work_size[0]);
+        System.out.println("local workGroupCount size " + local_work_size[0]);
 
         long start = System.nanoTime();
         clEnqueueNDRangeKernel(commandQueue, kernel, 1, null, global_work_size, local_work_size, 0, null, null);
